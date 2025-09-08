@@ -367,7 +367,7 @@ export default function FoodListingPage() {
           name: item.h,
           price: totalPrice,
           quantity: 1,
-          image: item.i,
+          image: item.i, // This is the image URL from the API
           addOns,
         },
       ]
@@ -1477,6 +1477,10 @@ export default function FoodListingPage() {
                     src={cartItem.image || "/placeholder.svg"}
                     alt={cartItem.name}
                     className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                    onError={(e) => {
+                      // Fallback to placeholder if image fails to load
+                      (e.target as HTMLImageElement).src = "/placeholder.svg";
+                    }}
                   />
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">{cartItem.name}</h3>
