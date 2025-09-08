@@ -217,7 +217,7 @@ export default function FoodListingPage() {
     const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}) => {
       try {
         const currentDate = new Date().toISOString();
-        const response = await fetch('http://192.168.2.17:8080/api/getOutletFood', {
+        const response = await fetch('https://foodieos-786353173154.asia-south1.run.app/api/getOutletFood', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
