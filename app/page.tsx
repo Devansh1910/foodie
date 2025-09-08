@@ -246,7 +246,12 @@ export default function FoodListingPage() {
         console.log('API Response:', data);
         
         if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
-          setFoodData(data.output.r);
+          // Remove duplicates by creating a Map with item.id as the key
+          const uniqueItems = Array.from(new Map(
+            data.output.r.map((item: any) => [item.id, item])
+          ).values());
+          
+          setFoodData(uniqueItems);
         } else {
           setError("No food items available at the moment.");
           setFoodData([]);
