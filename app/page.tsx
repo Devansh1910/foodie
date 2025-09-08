@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import Image from "next/image"
 import {
   ArrowLeft,
   Search,
@@ -145,6 +146,10 @@ export default function FoodListingPage() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [showSearch, setShowSearch] = useState(false)
   const filtersContainerRef = useRef<HTMLDivElement>(null)
+  const [location, setLocation] = useState<{city: string; state: string; lat: number; lon: number} | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [foodData, setFoodData] = useState<any[]>([])
 
   // Add OTP state
   const [otp, setOtp] = useState("");
@@ -157,6 +162,106 @@ export default function FoodListingPage() {
       setShowCheckout(false);
     }
   }, [cart, showCheckout]);
+
+  // Request location permission and fetch food data
+  useEffect(() => {
+    const fetchLocationAndFoodData = async () => {
+      try {
+        setLoading(true);
+        
+        // Request location permission
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            async (position) => {
+              const { latitude, longitude } = position.coords;
+              
+              // Use a geocoding service to get city and state from coordinates
+              // For now, we'll use the default values from the API example
+              const locationData = {
+                city: "Prayagraj",
+                state: "UP",
+                lat: latitude,
+                lon: longitude
+              };
+              
+              setLocation(locationData);
+              await fetchFoodData(locationData);
+            },
+            (error) => {
+              console.error("Error getting location:", error);
+              setError("Please enable location services to see nearby restaurants.");
+              setLoading(false);
+              
+              // Fallback to default location if location access is denied
+              const defaultLocation = {
+                city: "Prayagraj",
+                state: "UP",
+                lat: 25.4358,
+                lon: 81.8463
+              };
+              setLocation(defaultLocation);
+              fetchFoodData(defaultLocation);
+            }
+          );
+        } else {
+          setError("Geolocation is not supported by your browser.");
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Error in location handling:", err);
+        setError("Error getting your location. Using default location.");
+        setLoading(false);
+      }
+    };
+
+    const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}) => {
+      try {
+        const currentDate = new Date().toISOString();
+        const response = await fetch('http://192.168.2.17:8080/api/getOutletFood', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            platform: 'iOS',
+            country: 'India',
+            city: locationData.city,
+            state: locationData.state,
+            lat: locationData.lat,
+            lon: locationData.lon,
+            outletid: 200,
+            foodCategory: 'BEVERAGES',
+            date: currentDate
+          }),
+          mode: 'cors',
+          credentials: 'omit'
+        });
+
+        if (!response.ok) {
+          throw new Error(`API request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('API Response:', data);
+        
+        if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
+          setFoodData(data.output.r);
+        } else {
+          setError("No food items available at the moment.");
+          setFoodData([]);
+        }
+      } catch (err) {
+        console.error("Error fetching food data:", err);
+        setError("Failed to load menu. Please try again later.");
+        setFoodData([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLocationAndFoodData();
+  }, []);
 
   // Function to scroll filter into view
   const scrollFilterIntoView = (element: HTMLElement | null) => {
@@ -197,10 +302,11 @@ export default function FoodListingPage() {
     }
   }, [vegFilter, nonVegFilter, selectedCategories]);
 
-  const categories = Array.from(new Set(mockFoodData.flatMap(item => item.ct ? [item.ct] : [])))
+  const categories = Array.from(new Set((foodData || []).flatMap((item: any) => item.ct ? [item.ct] : [])))
 
   const formatPrice = (price: number) => {
-    return `₹${(price / 100).toFixed(0)}`
+    // Prices are already in paise (e.g., 45000 = ₹450)
+    return `₹${(price / 100).toFixed(2)}`;
   }
 
   const categoryIcons: Record<string, JSX.Element> = {
@@ -216,7 +322,7 @@ export default function FoodListingPage() {
     return categoryIcons[category] || <span className="h-4 w-4">•</span>;
   };
 
-  const filteredItems = mockFoodData.filter((item) => {
+  const filteredItems = foodData?.filter((item: any) => {
     const matchesSearch = item.h.toLowerCase().includes(searchQuery.toLowerCase())
     
     // If no category is selected, show all items
@@ -237,13 +343,16 @@ export default function FoodListingPage() {
       const cartItemId = `${item.id}-${addOns.sort().join("-")}`
       const existing = prev.find((cartItem) => cartItem.id === cartItemId)
 
-      let totalPrice = item.dp
+      // Start with the base price in paise
+      let totalPrice = item.dp;
+      
+      // Add any add-ons prices (also in paise)
       if (item.addOns && addOns.length > 0) {
         const addOnPrice = addOns.reduce((sum, addOnId) => {
-          const addOn = item.addOns.find((ao: any) => ao.id === addOnId)
-          return sum + (addOn ? addOn.price : 0)
-        }, 0)
-        totalPrice += addOnPrice
+          const addOn = item.addOns.find((ao: any) => ao.id === addOnId);
+          return sum + (addOn ? addOn.price : 0);
+        }, 0);
+        totalPrice += addOnPrice;
       }
 
       if (existing) {
@@ -366,11 +475,17 @@ export default function FoodListingPage() {
     setCardholderName("")
   }
 
-  const currentModalItem = mockFoodData.find((item) => item.id === showItemModal)
+  const currentModalItem = foodData.find((item: any) => item.id === showItemModal)
 
   const getCartItemQuantity = (itemId: string) => {
-    const cartItem = cart.find((cartItem) => cartItem.id.startsWith(itemId))
-    return cartItem ? cartItem.quantity : 0
+    // Sum quantities of all variations of this item (with different add-ons)
+    const baseId = getBaseCartItemId(itemId);
+    return cart.reduce((total, cartItem) => {
+      if (cartItem.id.startsWith(baseId)) {
+        return total + cartItem.quantity;
+      }
+      return total;
+    }, 0);
   }
 
   const getBaseCartItemId = (itemId: string) => {
@@ -408,10 +523,10 @@ export default function FoodListingPage() {
 
   // UPI Apps data
   const upiApps = [
-    { id: 'gpay', name: 'Google Pay', icon: '💳' },
-    { id: 'phonepe', name: 'PhonePe', icon: '📱' },
-    { id: 'paytm', name: 'Paytm', icon: '💸' },
-    { id: 'other', name: 'Other UPI Apps', icon: '🔗' },
+    { id: 'gpay',icon: '/gpay.svg' },
+    { id: 'phonepe',icon: '/phonepe.png' },
+    { id: 'paytm',icon: '/paytm.png' },
+    { id: 'other',icon: '/upi.png' },
   ];
 
   // Handle payment method selection
@@ -433,13 +548,44 @@ export default function FoodListingPage() {
   // Handle UPI app selection
   const handleUpiAppSelect = (appId: string) => {
     setSelectedUpiApp(appId);
-    // Simulate app opening with animation
+    
+    // Get total price in paise (e.g., 45000 = ₹450)
+    const totalInPaise = getTotalPrice();
+    // Convert to rupees by dividing by 100
+    const amountInRupees = (totalInPaise / 100).toFixed(2);
+    
+    // Debug logs
+    console.log('Cart items:', cart);
+    console.log('Total in paise:', totalInPaise);
+    console.log('Amount in rupees:', amountInRupees);
+    console.log('Amount being sent to UPI:', amountInRupees);
+    
+    // UPI deep links
+    const merchantName = 'Foodie%20Restaurant'; // URL-encoded merchant name
+    const transactionNote = 'Food%20Order%20Payment';
+    
+    const upiLinks = {
+      gpay: `tez://upi/pay?pa=devanshsaxena1019-1@okicici&pn=${merchantName}&am=${amountInRupees}&cu=INR&tn=${transactionNote}`,
+      phonepe: `phonepe://pay?pa=devanshsaxena1019-1@okicici&pn=${merchantName}&am=${amountInRupees}&cu=INR&tn=${transactionNote}`,
+      other: `upi://pay?pa=devanshsaxena1019-1@okicici&pn=${merchantName}&am=${amountInRupees}&cu=INR&tn=${transactionNote}`
+    };
+
+    // Open the selected UPI app
+    const upiLink = upiLinks[appId as keyof typeof upiLinks] || upiLinks.other;
+    
+    // Try to open the UPI app
+    window.location.href = upiLink;
+    
+    // Fallback: If UPI app not installed, show success after delay
     setTimeout(() => {
+      if (document.hidden) return; // If app opened successfully
+      
+      // If still on page, show success animation
       setPaymentSuccess(true);
       setTimeout(() => {
         handlePaymentSuccess();
       }, 2000);
-    }, 1000);
+    }, 500);
   };
 
   // Handle payment success
@@ -454,11 +600,23 @@ export default function FoodListingPage() {
     // Show success message or navigate to order confirmation
   };
 
+  useEffect(() => {
+    if (showPayment) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showPayment]);
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className={`min-h-screen bg-background ${showPayment ? 'overflow-hidden' : ''}`}>
       {/* Payment Page */}
       {showPayment && (
-        <div className="min-h-screen bg-background">
+        <div className="fixed inset-0 bg-background z-50 overflow-y-auto">
           <div className="bg-card border-b px-6 py-4 sticky top-0 z-20">
             <div className="flex items-center gap-4">
               <Button variant="ghost" size="sm" onClick={() => setShowPayment(false)} className="p-2">
@@ -529,29 +687,31 @@ export default function FoodListingPage() {
                   </div>
                 </div>
 
-                {/* UPI Payment Option */}
+                {/* UPI Payment Option - Disabled */}
                 <div 
-                  className={`bg-card rounded-xl border-2 p-4 cursor-pointer transition-all ${
-                    selectedPaymentMethod === 'upi' ? 'border-primary' : 'border-border'
-                  }`}
-                  onClick={() => handlePaymentMethodSelect('upi')}
+                  className="bg-muted/40 rounded-xl border-2 p-4 cursor-not-allowed border-border/50"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="bg-blue-100 p-2 rounded-lg">
-                        <svg className="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <div className="bg-muted p-2 rounded-lg">
+                        <svg className="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                         </svg>
                       </div>
                       <div>
-                        <h4 className="font-medium">UPI Apps</h4>
-                        <p className="text-sm text-muted-foreground">Pay using any UPI app</p>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-muted-foreground">UPI Payment</h4>
+                          <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">Not available</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">Payment support is not active in this outlet</p>
                       </div>
                     </div>
-                    <div className="w-5 h-5 rounded-full border-2">
-                      <svg className="w-full h-full text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
+                    <div className="w-5 h-5 rounded-full border-2 border-muted-foreground/30">
+                      <div className="w-full h-full rounded-full bg-muted-foreground/20 scale-75"></div>
                     </div>
                   </div>
                 </div>
@@ -593,8 +753,19 @@ export default function FoodListingPage() {
                       className="bg-card rounded-xl border p-4 flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={() => handleUpiAppSelect(app.id)}
                     >
-                      <span className="text-2xl">{app.icon}</span>
-                      <span className="text-sm font-medium">{app.name}</span>
+                      <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center p-2 relative">
+                        <Image
+                          src={app.icon}
+                          width={100}
+                          height={100}
+                          className="object-contain"
+                          onError={(e) => {
+                            // Fallback to placeholder if image fails to load
+                            const target = e.target as HTMLImageElement;
+                            target.src = '/placeholder.svg';
+                          }}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -681,10 +852,15 @@ export default function FoodListingPage() {
                     We've sent a verification code to +91{phoneNumber}
                   </p>
                   <Input
-                    type="text"
-                    placeholder="Enter OTP"
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="Enter 6-digit OTP"
                     value={otp}
-                    onChange={(e) => setOtp(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, ''); // Remove non-digits
+                      setOtp(value.slice(0, 6)); // Limit to 6 digits
+                    }}
                     className="h-12 text-base text-center text-lg tracking-widest"
                     maxLength={6}
                   />
@@ -959,10 +1135,14 @@ export default function FoodListingPage() {
             {filteredItems.map((item) => (
               <div
                 key={item.id}
-                className="bg-card rounded-lg border hover:shadow-md transition-shadow overflow-hidden p-3 flex gap-3 cursor-pointer"
-                onClick={() => {
-                  setShowItemModal(item.id)
-                  setSelectedAddOns([])
+                className="bg-card rounded-lg border hover:shadow-md transition-shadow overflow-hidden p-3 flex gap-3"
+                onClick={(e) => {
+                  // Only handle click if the target is not the add button
+                  const target = e.target as HTMLElement;
+                  if (!target.closest('button') && !target.closest('svg') && !target.closest('path')) {
+                    setShowItemModal(item.id);
+                    setSelectedAddOns([]);
+                  }
                 }}
               >
                 {/* Left: Image with veg/non-veg indicator */}
@@ -1002,16 +1182,24 @@ export default function FoodListingPage() {
                     {getCartItemQuantity(item.id) > 0 ? (
                       <div
                         className="flex items-center gap-1 bg-muted rounded-lg"
-                        onClick={(e) => e.stopPropagation()} // prevent modal when changing qty
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            const baseId = getBaseCartItemId(item.id)
-                            const cartItem = cart.find((ci) => ci.id.startsWith(baseId))
-                            if (cartItem) {
-                              updateCartItemQuantity(cartItem.id, cartItem.quantity - 1)
+                            const baseId = getBaseCartItemId(item.id);
+                            // Find all variations of this item in cart
+                            const allVariations = cart.filter(ci => ci.id.startsWith(item.id));
+                            const baseCartItem = cart.find(ci => ci.id === baseId);
+                            
+                            if (allVariations.length > 1) {
+                              // If multiple variations exist, open the bottom sheet
+                              setShowItemModal(item.id);
+                              setSelectedAddOns([]);
+                            } else if (baseCartItem) {
+                              // If only base item exists, reduce its quantity
+                              updateCartItemQuantity(baseCartItem.id, baseCartItem.quantity - 1);
                             }
                           }}
                           className="h-7 w-7 p-0"
@@ -1024,13 +1212,20 @@ export default function FoodListingPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            const baseId = getBaseCartItemId(item.id)
-                            const cartItem = cart.find((ci) => ci.id.startsWith(baseId))
-                            if (cartItem) {
-                              updateCartItemQuantity(cartItem.id, cartItem.quantity + 1)
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (item.customizable) {
+                              setShowItemModal(item.id);
+                              setSelectedAddOns([]);
                             } else {
-                              addToCart(item)
+                              const baseId = getBaseCartItemId(item.id);
+                              // Find the base item (without add-ons)
+                              const baseCartItem = cart.find(ci => ci.id === baseId);
+                              if (baseCartItem) {
+                                updateCartItemQuantity(baseCartItem.id, baseCartItem.quantity + 1);
+                              } else {
+                                addToCart(item);
+                              }
                             }
                           }}
                           className="h-7 w-7 p-0"
@@ -1042,8 +1237,12 @@ export default function FoodListingPage() {
                       <Button
                         onClick={(e) => {
                           e.stopPropagation() // prevent triggering card click
-                          setShowItemModal(item.id)
-                            setSelectedAddOns([])
+                          if (item.customizable) {
+                            setShowItemModal(item.id);
+                            setSelectedAddOns([]);
+                          } else {
+                            addToCart(item);
+                          }
                         }}
                         size="sm"
                         className="px-4 font-semibold"
