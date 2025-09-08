@@ -16,11 +16,17 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
   const [scanned, setScanned] = useState(false);
   const router = useRouter();
 
+  const [retryCount, setRetryCount] = useState(0);
+  const [isScanning, setIsScanning] = useState(false);
+
   useEffect(() => {
     let stream: MediaStream | null = null;
     let codeReader: BrowserQRCodeReader | null = null;
+    let scanTimeout: NodeJS.Timeout;
 
     const startScanner = async () => {
+      if (isScanning) return;
+      setIsScanning(true);
       try {
         // Initialize the QR code reader
         codeReader = new BrowserQRCodeReader();
@@ -39,6 +45,7 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
           await codeReader.decodeFromVideoElement(
             videoRef.current,
             (result: any, err: any) => {
+              if (isScanning === false) return; // Skip if scanner is stopped
               if (result) {
                 try {
                   const text = result.getText();
@@ -96,15 +103,26 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
               }
               
               if (err) {
-                // Check if it's a NotFoundException without using instanceof
-                // since it might not work with the minified code
-                const isNotFoundException = err.name === 'NotFoundException' || 
-                                         err.message?.includes('NotFoundException') ||
-                                         (err as any).constructor?.name === 'NotFoundException';
+                console.error('Scanning error:', err);
                 
-                if (!isNotFoundException) {
-                  console.error('Scanning error:', err);
-                  setError('Error scanning QR code. Please try again.');
+                // Auto-retry logic
+                if (retryCount < 3) {
+                  console.log(`Retrying scan... (${retryCount + 1}/3)`);
+                  setRetryCount(prev => prev + 1);
+                  // Add a small delay before retrying
+                  setTimeout(() => {
+                    if (videoRef.current && videoRef.current.srcObject) {
+                      codeReader?.decodeFromVideoDevice(
+                        undefined,
+                        videoRef.current,
+                        (result: any, err: any) => {
+                          // Handle result and error
+                        }
+                      );
+                    }
+                  }, 500);
+                } else {
+                  setError('Failed to scan QR code. Please try again or enter manually.');
                 }
               }
             }
@@ -119,10 +137,17 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
     startScanner();
 
     // Cleanup function
+    // Start the scanner
+    startScanner();
+
     return () => {
+      setIsScanning(false);
       if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(track => {
+          track.stop();
+        });
       }
+      if (scanTimeout) clearTimeout(scanTimeout);
     };
   }, [onScanSuccess]);
 
@@ -171,13 +196,37 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
       )}
       
       <div className="w-full max-w-md mt-4">
-        <Button 
-          variant="outline" 
-          className="w-full"
-          onClick={handleManualEntry}
-        >
-          Enter Manually (For Testing)
-        </Button>
+        {process.env.NODE_ENV === 'development' || error ? (
+          <div className="flex flex-col items-center justify-center p-4">
+            {error && (
+              <div className="mb-4 p-2 bg-red-100 text-red-700 rounded">
+                {error}
+              </div>
+            )}
+            <Button 
+              onClick={() => {
+                setError(null);
+                setRetryCount(0);
+              }}
+              className="mb-4"
+            >
+              Try Scanning Again
+            </Button>
+            {process.env.NODE_ENV === 'development' && (
+              <Button onClick={handleManualEntry} variant="outline">
+                Enter Manually (Dev Only)
+              </Button>
+            )}
+          </div>
+        ) : (
+          <Button 
+            variant="outline" 
+            className="w-full"
+            onClick={handleManualEntry}
+          >
+            Enter Manually (For Testing)
+          </Button>
+        )}
       </div>
       
       <p className="text-muted-foreground text-sm mt-6 text-center">
