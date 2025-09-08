@@ -177,15 +177,22 @@ export default function FoodListingPage() {
   // Handle scanned data
   const handleScanSuccess = (data: QRCodeData) => {
     console.log('Scanned data:', data);
+    
+    // Store the scanned data in localStorage for persistence
+    const sessionData = {
+      ...data,
+      timestamp: new Date().toISOString()
+    };
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('tableSession', JSON.stringify(sessionData));
+    }
+    
+    // Update state
     setScannedData(data);
     setShowScanner(false);
-    // Store the scanned data in localStorage for persistence
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('tableSession', JSON.stringify({
-        ...data,
-        timestamp: new Date().toISOString()
-      }));
-    }
+    
+    // Get location and fetch food data
     getLocation();
   };
 
@@ -247,111 +254,106 @@ export default function FoodListingPage() {
     }
   }, []);
 
-  // Request location permission and fetch food data
-  useEffect(() => {
-    if (!scannedData) return;
-    
-    const fetchLocationAndFoodData = async () => {
-      try {
-        setLoading(true);
-        
-        // Request location permission
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            async (position) => {
-              const { latitude, longitude } = position.coords;
-              
-              // Use a geocoding service to get city and state from coordinates
-              // For now, we'll use the default values from the API example
-              const locationData = {
-                city: "Prayagraj",
-                state: "UP",
-                lat: latitude,
-                lon: longitude
-              };
-              
-              setLocation(locationData);
-              await fetchFoodData(locationData);
-            },
-            (error) => {
-              console.error("Error getting location:", error);
-              setError("Please enable location services to see nearby restaurants.");
-              setLoading(false);
-              
-              // Fallback to default location if location access is denied
-              const defaultLocation = {
-                city: "Prayagraj",
-                state: "UP",
-                lat: 25.4358,
-                lon: 81.8463
-              };
-              setLocation(defaultLocation);
-              fetchFoodData(defaultLocation);
-            }
-          );
-        } else {
-          setError("Geolocation is not supported by your browser.");
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Error in location handling:", err);
-        setError("Error getting your location. Using default location.");
-        setLoading(false);
+  // Function to fetch food data
+  const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}) => {
+    try {
+      const currentDate = new Date().toISOString();
+      const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/getOutletFood', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          platform: 'iOS',
+          country: 'India',
+          city: locationData.city,
+          state: locationData.state,
+          lat: locationData.lat,
+          lon: locationData.lon,
+          outletid: 200,
+          foodCategory: 'BEVERAGES',
+          date: currentDate
+        }),
+        mode: 'cors',
+        credentials: 'omit'
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
       }
-    };
 
-    const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}) => {
-      try {
-        const currentDate = new Date().toISOString();
-        const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/getOutletFood', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({
-            platform: 'iOS',
-            country: 'India',
-            city: locationData.city,
-            state: locationData.state,
-            lat: locationData.lat,
-            lon: locationData.lon,
-            outletid: 200,
-            foodCategory: 'BEVERAGES',
-            date: currentDate
-          }),
-          mode: 'cors',
-          credentials: 'omit'
-        });
-
-        if (!response.ok) {
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log('API Response:', data);
+      const data = await response.json();
+      console.log('API Response:', data);
+      
+      if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
+        // Remove duplicates by creating a Map with item.id as the key
+        const uniqueItems = Array.from(new Map(
+          data.output.r.map((item: any) => [item.id, item])
+        ).values());
         
-        if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
-          // Remove duplicates by creating a Map with item.id as the key
-          const uniqueItems = Array.from(new Map(
-            data.output.r.map((item: any) => [item.id, item])
-          ).values());
-          
-          setFoodData(uniqueItems);
-        } else {
-          setError("No food items available at the moment.");
-          setFoodData([]);
-        }
-      } catch (err) {
-        console.error("Error fetching food data:", err);
-        setError("Failed to load menu. Please try again later.");
+        setFoodData(uniqueItems);
+      } else {
+        setError("No food items available at the moment.");
         setFoodData([]);
-      } finally {
-        setLoading(false);
       }
-    };
+    } catch (err) {
+      console.error("Error fetching food data:", err);
+      setError("Failed to load menu. Please try again later.");
+      setFoodData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchLocationAndFoodData();
+  // Function to get user's location
+  const getLocation = () => {
+    setLoading(true);
+    
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          
+          // Use a geocoding service to get city and state from coordinates
+          // For now, we'll use the default values from the API example
+          const locationData = {
+            city: "Prayagraj",
+            state: "UP",
+            lat: latitude,
+            lon: longitude
+          };
+          
+          setLocation(locationData);
+          await fetchFoodData(locationData);
+        },
+        (error) => {
+          console.error("Error getting location:", error);
+          setError("Please enable location services to see nearby restaurants.");
+          setLoading(false);
+          
+          // Fallback to default location if location access is denied
+          const defaultLocation = {
+            city: "Prayagraj",
+            state: "UP",
+            lat: 25.4358,
+            lon: 81.8463
+          };
+          setLocation(defaultLocation);
+          fetchFoodData(defaultLocation);
+        }
+      );
+    } else {
+      setError("Geolocation is not supported by your browser.");
+      setLoading(false);
+    }
+  };
+
+  // Request location permission and fetch food data when scannedData changes
+  useEffect(() => {
+    if (scannedData) {
+      getLocation();
+    }
   }, [scannedData]);
 
   // Function to scroll filter into view

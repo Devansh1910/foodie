@@ -41,34 +41,53 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
             (result: any, err: any) => {
               if (result) {
                 try {
-                  let data: QRCodeData;
                   const text = result.getText();
+                  console.log('Scanned text:', text);
                   
-                  // Check if it's a URL with query parameters
+                  // Handle URL format
                   if (text.startsWith('http')) {
                     const url = new URL(text);
-                    data = {
-                      tableId: url.searchParams.get('tableId') || '',
-                      outletId: url.searchParams.get('outletId') || '',
+                    const tableId = url.searchParams.get('tableId');
+                    const outletId = url.searchParams.get('outletId');
+                    
+                    if (!tableId || !outletId) {
+                      throw new Error('URL is missing required parameters');
+                    }
+                    
+                    const data: QRCodeData = {
+                      tableId,
+                      outletId,
                       outletName: url.searchParams.get('outletName') || undefined,
                       tableNumber: url.searchParams.get('tableNumber') || undefined
                     };
-                  } else {
-                    // Try to parse as JSON
-                    data = JSON.parse(text);
+                    
+                    console.log('Parsed data from URL:', data);
+                    processScannedData(data);
+                    return;
                   }
                   
-                  // Validate required fields
-                  if (!data.tableId || !data.outletId) {
-                    throw new Error('Invalid QR code: Missing required fields');
+                  // Try to parse as JSON
+                  try {
+                    const data = JSON.parse(text);
+                    if (!data.tableId || !data.outletId) {
+                      throw new Error('Invalid JSON: Missing required fields');
+                    }
+                    processScannedData(data);
+                  } catch (jsonError) {
+                    console.error('Error parsing as JSON:', jsonError);
+                    throw new Error('Invalid QR code format');
                   }
                   
-                  setScanned(true);
-                  onScanSuccess(data);
-                  
-                  // Stop all tracks
-                  if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
+                  // Process the scanned data
+                  function processScannedData(data: QRCodeData) {
+                    console.log('Processing scanned data:', data);
+                    setScanned(true);
+                    onScanSuccess(data);
+                    
+                    // Stop all tracks
+                    if (stream) {
+                      stream.getTracks().forEach(track => track.stop());
+                    }
                   }
                 } catch (e) {
                   console.error('Error parsing QR code:', e);
@@ -76,9 +95,17 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
                 }
               }
               
-              if (err && !(err instanceof NotFoundException)) {
-                console.error('Scanning error:', err);
-                setError('Error scanning QR code. Please try again.');
+              if (err) {
+                // Check if it's a NotFoundException without using instanceof
+                // since it might not work with the minified code
+                const isNotFoundException = err.name === 'NotFoundException' || 
+                                         err.message?.includes('NotFoundException') ||
+                                         (err as any).constructor?.name === 'NotFoundException';
+                
+                if (!isNotFoundException) {
+                  console.error('Scanning error:', err);
+                  setError('Error scanning QR code. Please try again.');
+                }
               }
             }
           );
