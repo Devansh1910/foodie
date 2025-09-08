@@ -22,6 +22,7 @@ import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import dynamic from 'next/dynamic';
+import SimpleQRScanner from '@/components/SimpleQRScanner';
 
 // Dynamically import the QRScanner component with no SSR
 const QRScanner = dynamic(
@@ -200,11 +201,8 @@ export default function FoodListingPage() {
   if (showScanner) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <QRScanner onScanSuccess={handleScanSuccess} />
-        <div className="mt-8 text-center text-sm text-muted-foreground">
-          <p>Scan the QR code at your table to view the menu and place an order.</p>
-          <p className="mt-2">Don't see a QR code? Ask your server for assistance.</p>
-        </div>
+        <h1 className="text-3xl font-bold mb-6">Scan Table QR Code</h1>
+        <SimpleQRScanner onScanSuccess={handleScanSuccess} />
       </div>
     );
   }
