@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import { QRCodeData } from '@/types/qr';
 import Image from "next/image"
 import {
   ArrowLeft,
@@ -19,6 +21,13 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import dynamic from 'next/dynamic';
+
+// Dynamically import the QRScanner component with no SSR
+const QRScanner = dynamic(
+  () => import('@/components/QRScanner'),
+  { ssr: false }
+);
 
 const mockFoodData = [
   {
@@ -147,8 +156,10 @@ export default function FoodListingPage() {
   const [showSearch, setShowSearch] = useState(false)
   const filtersContainerRef = useRef<HTMLDivElement>(null)
   const [location, setLocation] = useState<{city: string; state: string; lat: number; lon: number} | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [scannedData, setScannedData] = useState<QRCodeData | null>(null);
+  const [showScanner, setShowScanner] = useState(true);
   const [foodData, setFoodData] = useState<any[]>([])
 
   // Add OTP state
@@ -163,8 +174,62 @@ export default function FoodListingPage() {
     }
   }, [cart, showCheckout]);
 
+  // Handle scanned data
+  const handleScanSuccess = (data: QRCodeData) => {
+    console.log('Scanned data:', data);
+    setScannedData(data);
+    setShowScanner(false);
+    // Store the scanned data in localStorage for persistence
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('tableSession', JSON.stringify({
+        ...data,
+        timestamp: new Date().toISOString()
+      }));
+    }
+    getLocation();
+  };
+
+  // Show scanner if not scanned yet
+  if (showScanner) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <QRScanner onScanSuccess={handleScanSuccess} />
+        <div className="mt-8 text-center text-sm text-muted-foreground">
+          <p>Scan the QR code at your table to view the menu and place an order.</p>
+          <p className="mt-2">Don't see a QR code? Ask your server for assistance.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Check for existing session on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedSession = localStorage.getItem('tableSession');
+      if (savedSession) {
+        const session = JSON.parse(savedSession);
+        // Check if session is still valid (e.g., less than 4 hours old)
+        const sessionTime = new Date(session.timestamp).getTime();
+        const currentTime = new Date().getTime();
+        const hoursDiff = (currentTime - sessionTime) / (1000 * 60 * 60);
+        
+        if (hoursDiff < 4) {
+          setScannedData(session);
+          setShowScanner(false);
+          getLocation();
+          return;
+        } else {
+          // Clear expired session
+          localStorage.removeItem('tableSession');
+        }
+      }
+    }
+  }, []);
+
   // Request location permission and fetch food data
   useEffect(() => {
+    if (!scannedData) return;
+    
     const fetchLocationAndFoodData = async () => {
       try {
         setLoading(true);
@@ -266,7 +331,7 @@ export default function FoodListingPage() {
     };
 
     fetchLocationAndFoodData();
-  }, []);
+  }, [scannedData]);
 
   // Function to scroll filter into view
   const scrollFilterIntoView = (element: HTMLElement | null) => {
@@ -310,8 +375,11 @@ export default function FoodListingPage() {
   const categories = Array.from(new Set((foodData || []).flatMap((item: any) => item.ct ? [item.ct] : [])))
 
   const formatPrice = (price: number) => {
-    // Prices are already in paise (e.g., 45000 = ₹450)
-    return `₹${(price / 100).toFixed(2)}`;
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(price / 100);
   }
 
   const categoryIcons: Record<string, JSX.Element> = {
@@ -616,6 +684,32 @@ export default function FoodListingPage() {
       document.body.style.overflow = 'unset';
     };
   }, [showPayment]);
+
+  const handleSignOut = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('tableSession');
+    }
+    setScannedData(null);
+    setShowScanner(true);
+    setFoodData([]);
+  };
+
+  const renderHeader = () => (
+    <header className="sticky top-0 z-10 bg-background border-b">
+      <div className="container mx-auto px-4 py-3 flex justify-between items-center">
+        <h1 className="text-xl font-bold">Foodie</h1>
+        {!showScanner && (
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleSignOut}
+          >
+            Change Table
+          </Button>
+        )}
+      </div>
+    </header>
+  );
 
   return (
     <div className={`min-h-screen bg-background ${showPayment ? 'overflow-hidden' : ''}`}>
