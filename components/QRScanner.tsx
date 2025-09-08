@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from "./ui/button";
 import { useRouter } from 'next/navigation';
 import { QRCodeData } from '@/types/qr';
+import { BrowserQRCodeReader, NotFoundException } from '@zxing/browser';
 
 interface QRScannerProps {
   onScanSuccess: (data: QRCodeData) => void;
@@ -17,12 +18,11 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
 
   useEffect(() => {
     let stream: MediaStream | null = null;
-    let codeReader: any = null;
+    let codeReader: BrowserQRCodeReader | null = null;
 
     const startScanner = async () => {
       try {
-        // Dynamically import the QR code scanner library
-        const { BrowserQRCodeReader } = await import('@zxing/browser');
+        // Initialize the QR code reader
         codeReader = new BrowserQRCodeReader();
         
         // Get the video stream
@@ -76,9 +76,9 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
                 }
               }
               
-              if (err && !(err instanceof ZXing.NotFoundException)) {
-                setError('Error scanning QR code');
-                console.error(err);
+              if (err && !(err instanceof NotFoundException)) {
+                console.error('Scanning error:', err);
+                setError('Error scanning QR code. Please try again.');
               }
             }
           );
