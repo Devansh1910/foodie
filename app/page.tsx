@@ -1,8 +1,6 @@
 "use client"
 
-import { useRouter } from 'next/navigation';
-import { useState, useEffect, useRef } from 'react';
-import { QRCodeData } from '@/types/qr';
+import { useState, useRef, useEffect } from "react"
 import Image from "next/image"
 import {
   ArrowLeft,
@@ -21,14 +19,6 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import dynamic from 'next/dynamic';
-import SimpleQRScanner from '@/components/SimpleQRScanner';
-
-// Dynamically import the QRScanner component with no SSR
-const QRScanner = dynamic(
-  () => import('@/components/QRScanner'),
-  { ssr: false }
-);
 
 const mockFoodData = [
   {
@@ -157,10 +147,8 @@ export default function FoodListingPage() {
   const [showSearch, setShowSearch] = useState(false)
   const filtersContainerRef = useRef<HTMLDivElement>(null)
   const [location, setLocation] = useState<{city: string; state: string; lat: number; lon: number} | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [scannedData, setScannedData] = useState<QRCodeData | null>(null);
-  const [showScanner, setShowScanner] = useState(true);
   const [foodData, setFoodData] = useState<any[]>([])
 
   // Add OTP state
@@ -175,184 +163,110 @@ export default function FoodListingPage() {
     }
   }, [cart, showCheckout]);
 
-  // Handle scanned data
-  const handleScanSuccess = (data: QRCodeData) => {
-    console.log('Scanned data:', data);
-    
-    // Store the scanned data in localStorage for persistence
-    const sessionData = {
-      ...data,
-      timestamp: new Date().toISOString()
-    };
-    
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('tableSession', JSON.stringify(sessionData));
-    }
-    
-    // Update state
-    setScannedData(data);
-    setShowScanner(false);
-    
-    // Get location and fetch food data
-    getLocation();
-  };
-
-  // Show scanner if not scanned yet
-  if (showScanner) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-6">Scan Table QR Code</h1>
-        <SimpleQRScanner onScanSuccess={handleScanSuccess} />
-      </div>
-    );
-  }
-
-  // Check for URL parameters or existing session on mount
+  // Request location permission and fetch food data
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    // First, check for URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    const tableId = urlParams.get('tableId');
-    const outletId = urlParams.get('outletId');
-    
-    if (tableId && outletId) {
-      // We have URL parameters, use them
-      const urlData: QRCodeData = {
-        tableId,
-        outletId,
-        outletName: urlParams.get('outletName') || undefined,
-        tableNumber: urlParams.get('tableNumber') || undefined
-      };
-      
-      // Clear the URL parameters after reading them
-      window.history.replaceState({}, document.title, window.location.pathname);
-      
-      handleScanSuccess(urlData);
-      return;
-    }
-    
-    // No URL parameters, check for existing session
-    const savedSession = localStorage.getItem('tableSession');
-    if (savedSession) {
-      const session = JSON.parse(savedSession);
-      // Check if session is still valid (e.g., less than 4 hours old)
-      const sessionTime = new Date(session.timestamp).getTime();
-      const currentTime = new Date().getTime();
-      const hoursDiff = (currentTime - sessionTime) / (1000 * 60 * 60);
-      
-      if (hoursDiff < 4) {
-        setScannedData(session);
-        setShowScanner(false);
-        getLocation();
-      } else {
-        // Clear expired session
-        localStorage.removeItem('tableSession');
-      }
-    }
-  }, []);
-
-  // Function to fetch food data
-  const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}) => {
-    try {
-      const currentDate = new Date().toISOString();
-      const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/getOutletFood', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          platform: 'iOS',
-          country: 'India',
-          city: locationData.city,
-          state: locationData.state,
-          lat: locationData.lat,
-          lon: locationData.lon,
-          outletid: 200,
-          foodCategory: 'BEVERAGES',
-          date: currentDate
-        }),
-        mode: 'cors',
-        credentials: 'omit'
-      });
-
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('API Response:', data);
-      
-      if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
-        // Remove duplicates by creating a Map with item.id as the key
-        const uniqueItems = Array.from(new Map(
-          data.output.r.map((item: any) => [item.id, item])
-        ).values());
+    const fetchLocationAndFoodData = async () => {
+      try {
+        setLoading(true);
         
-        setFoodData(uniqueItems);
-      } else {
-        setError("No food items available at the moment.");
-        setFoodData([]);
-      }
-    } catch (err) {
-      console.error("Error fetching food data:", err);
-      setError("Failed to load menu. Please try again later.");
-      setFoodData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Function to get user's location
-  const getLocation = () => {
-    setLoading(true);
-    
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          
-          // Use a geocoding service to get city and state from coordinates
-          // For now, we'll use the default values from the API example
-          const locationData = {
-            city: "Prayagraj",
-            state: "UP",
-            lat: latitude,
-            lon: longitude
-          };
-          
-          setLocation(locationData);
-          await fetchFoodData(locationData);
-        },
-        (error) => {
-          console.error("Error getting location:", error);
-          setError("Please enable location services to see nearby restaurants.");
+        // Request location permission
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            async (position) => {
+              const { latitude, longitude } = position.coords;
+              
+              // Use a geocoding service to get city and state from coordinates
+              // For now, we'll use the default values from the API example
+              const locationData = {
+                city: "Prayagraj",
+                state: "UP",
+                lat: latitude,
+                lon: longitude
+              };
+              
+              setLocation(locationData);
+              await fetchFoodData(locationData);
+            },
+            (error) => {
+              console.error("Error getting location:", error);
+              setError("Please enable location services to see nearby restaurants.");
+              setLoading(false);
+              
+              // Fallback to default location if location access is denied
+              const defaultLocation = {
+                city: "Prayagraj",
+                state: "UP",
+                lat: 25.4358,
+                lon: 81.8463
+              };
+              setLocation(defaultLocation);
+              fetchFoodData(defaultLocation);
+            }
+          );
+        } else {
+          setError("Geolocation is not supported by your browser.");
           setLoading(false);
-          
-          // Fallback to default location if location access is denied
-          const defaultLocation = {
-            city: "Prayagraj",
-            state: "UP",
-            lat: 25.4358,
-            lon: 81.8463
-          };
-          setLocation(defaultLocation);
-          fetchFoodData(defaultLocation);
         }
-      );
-    } else {
-      setError("Geolocation is not supported by your browser.");
-      setLoading(false);
-    }
-  };
+      } catch (err) {
+        console.error("Error in location handling:", err);
+        setError("Error getting your location. Using default location.");
+        setLoading(false);
+      }
+    };
 
-  // Request location permission and fetch food data when scannedData changes
-  useEffect(() => {
-    if (scannedData) {
-      getLocation();
-    }
-  }, [scannedData]);
+    const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}) => {
+      try {
+        const currentDate = new Date().toISOString();
+        const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/getOutletFood', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            platform: 'iOS',
+            country: 'India',
+            city: locationData.city,
+            state: locationData.state,
+            lat: locationData.lat,
+            lon: locationData.lon,
+            outletid: 200,
+            foodCategory: 'BEVERAGES',
+            date: currentDate
+          }),
+          mode: 'cors',
+          credentials: 'omit'
+        });
+
+        if (!response.ok) {
+          throw new Error(`API request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('API Response:', data);
+        
+        if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
+          // Remove duplicates by creating a Map with item.id as the key
+          const uniqueItems = Array.from(new Map(
+            data.output.r.map((item: any) => [item.id, item])
+          ).values());
+          
+          setFoodData(uniqueItems);
+        } else {
+          setError("No food items available at the moment.");
+          setFoodData([]);
+        }
+      } catch (err) {
+        console.error("Error fetching food data:", err);
+        setError("Failed to load menu. Please try again later.");
+        setFoodData([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLocationAndFoodData();
+  }, []);
 
   // Function to scroll filter into view
   const scrollFilterIntoView = (element: HTMLElement | null) => {
@@ -396,11 +310,8 @@ export default function FoodListingPage() {
   const categories = Array.from(new Set((foodData || []).flatMap((item: any) => item.ct ? [item.ct] : [])))
 
   const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(price / 100);
+    // Prices are already in paise (e.g., 45000 = ₹450)
+    return `₹${(price / 100).toFixed(2)}`;
   }
 
   const categoryIcons: Record<string, JSX.Element> = {
@@ -705,32 +616,6 @@ export default function FoodListingPage() {
       document.body.style.overflow = 'unset';
     };
   }, [showPayment]);
-
-  const handleSignOut = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('tableSession');
-    }
-    setScannedData(null);
-    setShowScanner(true);
-    setFoodData([]);
-  };
-
-  const renderHeader = () => (
-    <header className="sticky top-0 z-10 bg-background border-b">
-      <div className="container mx-auto px-4 py-3 flex justify-between items-center">
-        <h1 className="text-xl font-bold">Foodie</h1>
-        {!showScanner && (
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleSignOut}
-          >
-            Change Table
-          </Button>
-        )}
-      </div>
-    </header>
-  );
 
   return (
     <div className={`min-h-screen bg-background ${showPayment ? 'overflow-hidden' : ''}`}>
