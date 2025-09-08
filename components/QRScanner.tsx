@@ -41,7 +41,22 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
             (result: any, err: any) => {
               if (result) {
                 try {
-                  const data = JSON.parse(result.getText()) as QRCodeData;
+                  let data: QRCodeData;
+                  const text = result.getText();
+                  
+                  // Check if it's a URL with query parameters
+                  if (text.startsWith('http')) {
+                    const url = new URL(text);
+                    data = {
+                      tableId: url.searchParams.get('tableId') || '',
+                      outletId: url.searchParams.get('outletId') || '',
+                      outletName: url.searchParams.get('outletName') || undefined,
+                      tableNumber: url.searchParams.get('tableNumber') || undefined
+                    };
+                  } else {
+                    // Try to parse as JSON
+                    data = JSON.parse(text);
+                  }
                   
                   // Validate required fields
                   if (!data.tableId || !data.outletId) {
@@ -87,6 +102,12 @@ export default function QRScanner({ onScanSuccess }: QRScannerProps) {
   const handleManualEntry = () => {
     // For development/testing purposes only
     if (process.env.NODE_ENV === 'development') {
+      const mockUrl = new URL('https://foodie-lake-five.vercel.app/');
+      mockUrl.searchParams.set('tableId', 'T123');
+      mockUrl.searchParams.set('outletId', 'O456');
+      mockUrl.searchParams.set('outletName', 'Test Outlet');
+      mockUrl.searchParams.set('tableNumber', '12');
+      
       const mockData: QRCodeData = {
         tableId: 'T123',
         outletId: 'O456',

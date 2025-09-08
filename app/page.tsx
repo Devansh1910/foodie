@@ -202,26 +202,47 @@ export default function FoodListingPage() {
     );
   }
 
-  // Check for existing session on mount
+  // Check for URL parameters or existing session on mount
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedSession = localStorage.getItem('tableSession');
-      if (savedSession) {
-        const session = JSON.parse(savedSession);
-        // Check if session is still valid (e.g., less than 4 hours old)
-        const sessionTime = new Date(session.timestamp).getTime();
-        const currentTime = new Date().getTime();
-        const hoursDiff = (currentTime - sessionTime) / (1000 * 60 * 60);
-        
-        if (hoursDiff < 4) {
-          setScannedData(session);
-          setShowScanner(false);
-          getLocation();
-          return;
-        } else {
-          // Clear expired session
-          localStorage.removeItem('tableSession');
-        }
+    if (typeof window === 'undefined') return;
+
+    // First, check for URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const tableId = urlParams.get('tableId');
+    const outletId = urlParams.get('outletId');
+    
+    if (tableId && outletId) {
+      // We have URL parameters, use them
+      const urlData: QRCodeData = {
+        tableId,
+        outletId,
+        outletName: urlParams.get('outletName') || undefined,
+        tableNumber: urlParams.get('tableNumber') || undefined
+      };
+      
+      // Clear the URL parameters after reading them
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+      handleScanSuccess(urlData);
+      return;
+    }
+    
+    // No URL parameters, check for existing session
+    const savedSession = localStorage.getItem('tableSession');
+    if (savedSession) {
+      const session = JSON.parse(savedSession);
+      // Check if session is still valid (e.g., less than 4 hours old)
+      const sessionTime = new Date(session.timestamp).getTime();
+      const currentTime = new Date().getTime();
+      const hoursDiff = (currentTime - sessionTime) / (1000 * 60 * 60);
+      
+      if (hoursDiff < 4) {
+        setScannedData(session);
+        setShowScanner(false);
+        getLocation();
+      } else {
+        // Clear expired session
+        localStorage.removeItem('tableSession');
       }
     }
   }, []);
