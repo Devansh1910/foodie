@@ -152,8 +152,14 @@ export default function FoodListingPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [foodData, setFoodData] = useState<any[]>([])
-  // Always show QR scanner by default
-  const [showQRScanner, setShowQRScanner] = useState(true)
+  // Show QR scanner by default if no outletId in URL
+  const [showQRScanner, setShowQRScanner] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return !params.has('outletId');
+    }
+    return false;
+  })
   const searchParams = useSearchParams()
   const [outletId, setOutletId] = useState<string | null>(null)
 
@@ -170,16 +176,17 @@ export default function FoodListingPage() {
   }, [cart, showCheckout])
 
   useEffect(() => {
-    // Always show QR scanner if no valid URL parameters
+    // Don't fetch data if we're showing the QR scanner
+    if (showQRScanner) return;
+    
+    // Check for URL parameters
     const urlOutletId = searchParams.get('outletId')
     const urlLat = searchParams.get('lat')
     const urlLon = searchParams.get('lon')
     const urlCity = searchParams.get('city')
     const urlState = searchParams.get('state')
-    const foodCategory = window.location.pathname.split('/').pop()
 
-    // Only proceed if we have all required parameters
-    if (urlOutletId && foodCategory && foodCategory !== 'ac') {
+    if (urlOutletId) {
       setOutletId(urlOutletId)
       
       // If we have coordinates in URL, use them
@@ -247,7 +254,7 @@ export default function FoodListingPage() {
         lon: 0
       })
     }
-  }, [searchParams])
+  }, [])
 
   const getLocationAndFetchData = (outletId: string) => {
     if (navigator.geolocation) {
@@ -313,14 +320,7 @@ export default function FoodListingPage() {
     try {
       setLoading(true)
       const currentDate = new Date().toISOString()
-      const outletIdToUse = outletIdParam || searchParams.get('outletId')
-      const foodCategory = window.location.pathname.split('/').pop()
-      
-      if (!outletIdToUse || !foodCategory) {
-        setError('Missing required parameters')
-        setShowQRScanner(true)
-        return
-      }
+      const outletIdToUse = outletIdParam || outletId || '200' // Default to 200 if no outlet ID
       
       const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/getOutletFood', {
         method: 'POST',
@@ -336,7 +336,7 @@ export default function FoodListingPage() {
           lat: locationData.lat,
           lon: locationData.lon,
           outletid: parseInt(outletIdToUse, 10),
-          foodCategory: foodCategory,
+          foodCategory: searchParams.get('category') || '',
           date: currentDate,
         }),
         mode: 'cors',
