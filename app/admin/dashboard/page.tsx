@@ -32,11 +32,63 @@ export default function AdminDashboard() {
   const [syncStatus, setSyncStatus] = useState('');
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && !localStorage.getItem('isAuthenticated')) {
-      router.push('/admin');
-    } else {
-      fetchMenuItems();
-    }
+    const fetchMenuData = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('https://foodieos-786353173154.asia-south1.run.app/api/getOutletFood', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            platform: 'web',
+            country: 'India',
+            city: 'Prayagraj',
+            state: 'UP',
+            lat: 25.4358,
+            lon: 81.8463,
+            outletid: 200,
+            foodCategory: 'ALL',
+            date: new Date().toISOString()
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch menu data');
+        }
+
+        const data = await response.json();
+        
+        if (data.status === 200 && data.output && data.output.foodList) {
+          // Map the API response to our menu item format
+          const formattedMenu = data.output.foodList.map((item: any) => ({
+            id: item.id.toString(),
+            h: item.name || 'No Name',
+            dp: item.price || 0,
+            ct: item.category || 'UNCATEGORIZED',
+            veg: item.isVeg || false,
+            wt: item.weight || '',
+            en: item.calories || '',
+            i: item.imageUrl || ''
+          }));
+          
+          setMenuItems(formattedMenu);
+          // Save to localStorage for offline access
+          localStorage.setItem('menuItems', JSON.stringify(formattedMenu));
+        }
+      } catch (error) {
+        console.error('Error fetching menu:', error);
+        // Fallback to localStorage if API fails
+        const savedMenu = localStorage.getItem('menuItems');
+        if (savedMenu) {
+          setMenuItems(JSON.parse(savedMenu));
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchMenuData();
   }, []);
 
   const fetchMenuItems = async () => {
@@ -116,49 +168,47 @@ export default function AdminDashboard() {
     try {
       setSyncStatus('Syncing with external API...');
       
-      // Format the menu items to match the required API structure
+      // Format the menu items for the API
       const formattedItems = menuItems.map(item => ({
-        id: item.id,
-        h: item.h, // name
-        dp: item.dp, // price in paise
-        ct: item.ct, // category
-        veg: item.veg,
-        wt: item.wt, // weight
-        en: item.en, // calories/energy
-        i: item.i    // image URL
+        id: parseInt(item.id) || Date.now(),
+        name: item.h,
+        price: item.dp,
+        category: item.ct,
+        isVeg: item.veg,
+        weight: item.wt,
+        calories: item.en,
+        imageUrl: item.i
       }));
 
       // Call the external API
-      const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/updateOutletFood?outletid=200', {
+      const response = await fetch('https://foodieos-786353173154.asia-south1.run.app/api/updateOutletFood', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          status: 200,
-          code: 10001,
-          result: "success",
-          msg: "",
-          output: {
-            outletName: "Spice Garden Mumbai",
-            city: { id: 200, name: "Mumbai", state: "Maharashtra" },
-            r: formattedItems
-          }
-        }),
+          platform: 'web',
+          outletid: 200,
+          foodList: formattedItems
+        })
       });
-      
-      const result = await response.json();
-      if (response.ok) {
-        setSyncStatus('Menu synced successfully with external API!');
-      } else {
-        console.error('API Error:', result);
-        setSyncStatus(`Error: ${result.msg || 'Failed to sync with external API'}`);
+
+      if (!response.ok) {
+        throw new Error('Failed to sync with external API');
       }
-      
-      setTimeout(() => setSyncStatus(''), 5000);
+
+      const result = await response.json();
+      if (result.status === 200) {
+        setSyncStatus('Menu synced successfully!');
+        // Update local storage with the synced data
+        localStorage.setItem('menuItems', JSON.stringify(menuItems));
+      } else {
+        throw new Error(result.msg || 'Failed to sync menu');
+      }
     } catch (error) {
-      console.error('Error syncing menu:', error);
-      setSyncStatus('Error: Failed to connect to external API');
+      console.error('Sync error:', error);
+      setSyncStatus(`Error: ${error instanceof Error ? error.message : 'Failed to sync menu'}`);
+    } finally {
       setTimeout(() => setSyncStatus(''), 5000);
     }
   };
