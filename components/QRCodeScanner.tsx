@@ -73,55 +73,71 @@ export function QRCodeScanner({ onClose }: { onClose: () => void }) {
     if (scanned) return;
     
     try {
-      const urlObj = new URL(url);
-      const pathParts = urlObj.pathname.split('/').filter(Boolean);
-      const outletId = pathParts[pathParts.length - 1];
+      // Handle both full URLs and just the path
+      let path = url;
+      if (url.startsWith('http')) {
+        const urlObj = new URL(url);
+        path = urlObj.pathname;
+      }
       
-      if (outletId) {
-        setScanned(true);
-        setLoading(true);
-        
-        // Get current location
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            async (position) => {
-              const { latitude, longitude } = position.coords;
+      // Extract outlet ID and food category from path like /ac/200
+      const pathParts = path.split('/').filter(Boolean);
+      if (pathParts.length < 2) {
+        throw new Error('Invalid QR code format');
+      }
+      
+      const foodCategory = pathParts[0]; // 'ac' in /ac/200
+      const outletId = pathParts[1];     // '200' in /ac/200
+      
+      if (!outletId || !foodCategory) {
+        throw new Error('Missing outlet ID or food category in QR code');
+      }
+      
+      setScanned(true);
+      setLoading(true);
+      
+      // Get current location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            
+            // Get address details using reverse geocoding
+            try {
+              const response = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`
+              );
+              const data = await response.json();
               
-              // Get address details using reverse geocoding
-              try {
-                const response = await fetch(
-                  `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`
-                );
-                const data = await response.json();
-                
-                const address = data.address || {};
-                const city = address.city || address.town || address.village || '';
-                const state = address.state || '';
-                
-                // Redirect to food listing with all parameters
-                router.push(
-                  `/?outletId=${outletId}&lat=${latitude}&lon=${longitude}&city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}`
-                );
-              } catch (err) {
-                console.error('Error getting address:', err);
-                // Redirect with just coordinates if address lookup fails
-                router.push(`/?outletId=${outletId}&lat=${latitude}&lon=${longitude}`);
-              }
-            },
-            (err) => {
-              console.error('Error getting location:', err);
-              // Redirect without location if permission denied
-              router.push(`/?outletId=${outletId}`);
+              const address = data.address || {};
+              const city = address.city || address.town || address.village || '';
+              const state = address.state || '';
+              
+              // Redirect to food listing with all parameters
+              router.push(
+                `/${foodCategory}/${outletId}?lat=${latitude}&lon=${longitude}&city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}`
+              );
+            } catch (err) {
+              console.error('Error getting address:', err);
+              // Redirect with just coordinates if address lookup fails
+              router.push(`/${foodCategory}/${outletId}?lat=${latitude}&lon=${longitude}`);
             }
-          );
-        } else {
-          // Geolocation not supported
-          router.push(`/?outletId=${outletId}`);
-        }
+          },
+          (err) => {
+            console.error('Error getting location:', err);
+            // Redirect without location if permission denied
+            router.push(`/${foodCategory}/${outletId}`);
+          }
+        );
+      } else {
+        // Geolocation not supported
+        router.push(`/${foodCategory}/${outletId}`);
       }
     } catch (err) {
-      console.error('Invalid URL format:', err);
+      console.error('Error scanning QR code:', err);
       setError('Invalid QR code. Please scan a valid FoodieOS QR code.');
+      setScanned(false);
+      setLoading(false);
     }
   };
 
