@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from "react"
 import Image from "next/image"
+import { useSearchParams } from 'next/navigation'
+import { QRCodeScanner } from "@/components/QRCodeScanner"
 import {
   ArrowLeft,
   Search,
@@ -150,197 +152,287 @@ export default function FoodListingPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [foodData, setFoodData] = useState<any[]>([])
+  const [showQRScanner, setShowQRScanner] = useState(false)
+  const searchParams = useSearchParams()
+  const [outletId, setOutletId] = useState<string | null>(null)
 
   // Add OTP state
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [verificationInProgress, setVerificationInProgress] = useState(false);
+  const [otp, setOtp] = useState("")
+  const [otpSent, setOtpSent] = useState(false)
+  const [verificationInProgress, setVerificationInProgress] = useState(false)
 
   // Close Order Summary if cart becomes empty
   useEffect(() => {
     if (showCheckout && cart.length === 0) {
-      setShowCheckout(false);
+      setShowCheckout(false)
     }
-  }, [cart, showCheckout]);
+  }, [cart, showCheckout])
 
-  // Request location permission and fetch food data
   useEffect(() => {
-    const fetchLocationAndFoodData = async () => {
-      try {
-        setLoading(true);
-        
-        // Request location permission
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            async (position) => {
-              const { latitude, longitude } = position.coords;
+    // Check for URL parameters first
+    const urlOutletId = searchParams.get('outletId')
+    const urlLat = searchParams.get('lat')
+    const urlLon = searchParams.get('lon')
+    const urlCity = searchParams.get('city')
+    const urlState = searchParams.get('state')
+
+    if (urlOutletId) {
+      setOutletId(urlOutletId)
+      
+      // If we have coordinates in URL, use them
+      if (urlLat && urlLon) {
+        fetchFoodData({
+          city: urlCity || '',
+          state: urlState || '',
+          lat: parseFloat(urlLat),
+          lon: parseFloat(urlLon)
+        })
+      } else {
+        // Otherwise, try to get current location
+        getLocationAndFetchData(urlOutletId)
+      }
+    } else if (navigator.geolocation) {
+      // No outlet ID in URL, check for geolocation
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords
+          
+          // Use a reverse geocoding service to get city and state
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`)
+            .then(response => response.json())
+            .then(data => {
+              const address = data.address || {}
+              const city = address.city || address.town || address.village || ''
+              const state = address.state || ''
               
-              // Use a geocoding service to get city and state from coordinates
-              // For now, we'll use the default values from the API example
-              const locationData = {
-                city: "Prayagraj",
-                state: "UP",
+              // Now fetch food data with location
+              fetchFoodData({
+                city,
+                state,
                 lat: latitude,
                 lon: longitude
-              };
-              
-              setLocation(locationData);
-              await fetchFoodData(locationData);
-            },
-            (error) => {
-              console.error("Error getting location:", error);
-              setError("Please enable location services to see nearby restaurants.");
-              setLoading(false);
-              
-              // Fallback to default location if location access is denied
-              const defaultLocation = {
-                city: "Prayagraj",
-                state: "UP",
-                lat: 25.4358,
-                lon: 81.8463
-              };
-              setLocation(defaultLocation);
-              fetchFoodData(defaultLocation);
-            }
-          );
-        } else {
-          setError("Geolocation is not supported by your browser.");
-          setLoading(false);
+              })
+            })
+            .catch(err => {
+              console.error('Error getting address:', err)
+              // Continue with just coordinates if address lookup fails
+              fetchFoodData({
+                city: '',
+                state: '',
+                lat: latitude,
+                lon: longitude
+              })
+            })
+        },
+        (err) => {
+          console.error('Error getting location:', err)
+          // If user denies location, fetch without it
+          fetchFoodData({
+            city: '',
+            state: '',
+            lat: 0,
+            lon: 0
+          })
         }
-      } catch (err) {
-        console.error("Error in location handling:", err);
-        setError("Error getting your location. Using default location.");
-        setLoading(false);
-      }
-    };
+      )
+    } else {
+      // If geolocation is not available, fetch without location
+      fetchFoodData({
+        city: '',
+        state: '',
+        lat: 0,
+        lon: 0
+      })
+    }
+  }, [])
 
-    const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}) => {
-      try {
-        const currentDate = new Date().toISOString();
-        const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/getOutletFood', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({
-            platform: 'iOS',
-            country: 'India',
-            city: locationData.city,
-            state: locationData.state,
-            lat: locationData.lat,
-            lon: locationData.lon,
-            outletid: 200,
-            foodCategory: 'BEVERAGES',
-            date: currentDate
-          }),
-          mode: 'cors',
-          credentials: 'omit'
-        });
-
-        if (!response.ok) {
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log('API Response:', data);
-        
-        if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
-          // Remove duplicates by creating a Map with item.id as the key
-          const uniqueItems = Array.from(new Map(
-            data.output.r.map((item: any) => [item.id, item])
-          ).values());
+  const getLocationAndFetchData = (outletId: string) => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords
           
-          setFoodData(uniqueItems);
-        } else {
-          setError("No food items available at the moment.");
-          setFoodData([]);
+          // Use a reverse geocoding service to get city and state
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`)
+            .then(response => response.json())
+            .then(data => {
+              const address = data.address || {}
+              const city = address.city || address.town || address.village || ''
+              const state = address.state || ''
+              
+              // Now fetch food data with location
+              fetchFoodData({
+                city,
+                state,
+                lat: latitude,
+                lon: longitude
+              }, outletId)
+            })
+            .catch(err => {
+              console.error('Error getting address:', err)
+              // Continue with just coordinates if address lookup fails
+              fetchFoodData({
+                city: '',
+                state: '',
+                lat: latitude,
+                lon: longitude
+              }, outletId)
+            })
+        },
+        (err) => {
+          console.error('Error getting location:', err)
+          // If user denies location, fetch without it
+          fetchFoodData({
+            city: '',
+            state: '',
+            lat: 0,
+            lon: 0
+          }, outletId)
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
         }
-      } catch (err) {
-        console.error("Error fetching food data:", err);
-        setError("Failed to load menu. Please try again later.");
-        setFoodData([]);
-      } finally {
-        setLoading(false);
-      }
-    };
+      )
+    } else {
+      // If geolocation is not available, fetch without location
+      fetchFoodData({
+        city: '',
+        state: '',
+        lat: 0,
+        lon: 0
+      }, outletId)
+    }
+  }
 
-    fetchLocationAndFoodData();
-  }, []);
+  const fetchFoodData = async (locationData: {city: string; state: string; lat: number; lon: number}, outletIdParam?: string) => {
+    try {
+      setLoading(true)
+      const currentDate = new Date().toISOString()
+      const outletIdToUse = outletIdParam || outletId || '200' // Default to 200 if no outlet ID
+      
+      const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/getOutletFood', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          platform: 'web',
+          country: 'India',
+          city: locationData.city,
+          state: locationData.state,
+          lat: locationData.lat,
+          lon: locationData.lon,
+          outletid: parseInt(outletIdToUse, 10),
+          foodCategory: searchParams.get('category') || '',
+          date: currentDate,
+        }),
+        mode: 'cors',
+        credentials: 'omit'
+      })
+
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`)
+      }
+
+      const data = await response.json()
+      console.log('API Response:', data)
+      
+      if (data.status === 200 && data.output && Array.isArray(data.output.r)) {
+        // Remove duplicates by creating a Map with item.id as the key
+        const uniqueItems = Array.from(new Map(
+          data.output.r.map((item: any) => [item.id, item])
+        ).values())
+        
+        setFoodData(uniqueItems)
+      } else {
+        setError("No food items available at the moment.")
+        setFoodData([])
+      }
+    } catch (err) {
+      console.error("Error fetching food data:", err)
+      setError("Failed to load menu. Please try again later.")
+      setFoodData([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // Function to scroll filter into view
   const scrollFilterIntoView = (element: HTMLElement | null) => {
-    if (!element || !filtersContainerRef.current) return;
+    if (!element || !filtersContainerRef.current) return
     
-    const container = filtersContainerRef.current;
-    const containerWidth = container.offsetWidth;
-    const containerLeft = container.scrollLeft;
-    const containerRight = containerLeft + containerWidth;
+    const container = filtersContainerRef.current
+    const containerWidth = container.offsetWidth
+    const containerLeft = container.scrollLeft
+    const containerRight = containerLeft + containerWidth
     
-    const elementLeft = element.offsetLeft;
-    const elementRight = elementLeft + element.offsetWidth;
-    const elementWidth = element.offsetWidth;
+    const elementLeft = element.offsetLeft
+    const elementRight = elementLeft + element.offsetWidth
+    const elementWidth = element.offsetWidth
     
     // Calculate the center position
-    const scrollTo = elementLeft - (containerWidth / 2) + (elementWidth / 2);
+    const scrollTo = elementLeft - (containerWidth / 2) + (elementWidth / 2)
     
     // Smooth scroll to center the element
     container.scrollTo({
       left: scrollTo,
       behavior: 'smooth'
-    });
-  };
+    })
+  }
 
   // Effect to scroll to active filter when it changes
   useEffect(() => {
-    if (!filtersContainerRef.current) return;
+    if (!filtersContainerRef.current) return
     
     const activeFilter = filtersContainerRef.current.querySelector<HTMLElement>(
       '.bg-primary, [data-active-veg="true"], [data-active-nonveg="true"]'
-    );
+    )
     
     if (activeFilter) {
       // Small timeout to ensure the DOM has updated
       setTimeout(() => {
-        scrollFilterIntoView(activeFilter);
-      }, 50);
+        scrollFilterIntoView(activeFilter)
+      }, 50)
     }
-  }, [vegFilter, nonVegFilter, selectedCategories]);
+  }, [vegFilter, nonVegFilter, selectedCategories])
 
   const categories = Array.from(new Set((foodData || []).flatMap((item: any) => item.ct ? [item.ct] : [])))
 
   const formatPrice = (price: number) => {
     // Prices are already in paise (e.g., 45000 = ₹450)
-    return `₹${(price / 100).toFixed(2)}`;
+    return `₹${(price / 100).toFixed(2)}`
   }
 
   const categoryIcons: Record<string, JSX.Element> = {
     'PIZZA': <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>,
-    'SALAD': <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM18 13H6"/></svg>,
+    'SALAD': <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M18 13H6"/></svg>,
     'PASTA': <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3.5h-.5z"/></svg>,
     'BURGER': <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 12c-2.5 0-4.5-2-4.5-4.5S9.5 3 12 3s4.5 2 4.5 4.5-2 4.5-4.5 4.5z"/><path d="M18.5 10h-13a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1z"/></svg>,
     'BOWL': <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/><path d="M5.5 12h13"/></svg>,
     'WRAP': <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 6H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2z"/><path d="M6 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6z"/></svg>,
-  };
+  }
 
   const getCategoryIcon = (category: string) => {
-    return categoryIcons[category] || <span className="h-4 w-4">•</span>;
-  };
+    return categoryIcons[category] || <span className="h-4 w-4">•</span>
+  }
 
   const filteredItems = foodData?.filter((item: any) => {
     const matchesSearch = item.h.toLowerCase().includes(searchQuery.toLowerCase())
     
     // If no category is selected, show all items
-    const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(item.ct);
+    const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(item.ct)
     
     // Only apply veg/non-veg filter if a category is not selected
-    const shouldApplyVegFilter = selectedCategories.length === 0 && vegFilter;
-    const shouldApplyNonVegFilter = selectedCategories.length === 0 && nonVegFilter;
+    const shouldApplyVegFilter = selectedCategories.length === 0 && vegFilter
+    const shouldApplyNonVegFilter = selectedCategories.length === 0 && nonVegFilter
     
-    const matchesVeg = !shouldApplyVegFilter || item.veg;
-    const matchesNonVeg = !shouldApplyNonVegFilter || !item.veg;
+    const matchesVeg = !shouldApplyVegFilter || item.veg
+    const matchesNonVeg = !shouldApplyNonVegFilter || !item.veg
     
-    return matchesSearch && matchesCategory && matchesVeg && matchesNonVeg;
+    return matchesSearch && matchesCategory && matchesVeg && matchesNonVeg
   })
 
   const addToCart = (item: any, addOns: string[] = []) => {
@@ -349,15 +441,15 @@ export default function FoodListingPage() {
       const existing = prev.find((cartItem) => cartItem.id === cartItemId)
 
       // Start with the base price in paise
-      let totalPrice = item.dp;
+      let totalPrice = item.dp
       
       // Add any add-ons prices (also in paise)
       if (item.addOns && addOns.length > 0) {
         const addOnPrice = addOns.reduce((sum, addOnId) => {
-          const addOn = item.addOns.find((ao: any) => ao.id === addOnId);
-          return sum + (addOn ? addOn.price : 0);
-        }, 0);
-        totalPrice += addOnPrice;
+          const addOn = item.addOns.find((ao: any) => ao.id === addOnId)
+          return sum + (addOn ? addOn.price : 0)
+        }, 0)
+        totalPrice += addOnPrice
       }
 
       if (existing) {
@@ -426,42 +518,42 @@ export default function FoodListingPage() {
   const proceedToPhoneVerification = () => {
     setShowCheckout(false)
     setShowPhoneVerification(true)
-  };
+  }
 
   const proceedToPayment = () => {
     if (phoneNumber && isRobotChecked) {
-      setShowPhoneVerification(false);
-      setShowPayment(true);
+      setShowPhoneVerification(false)
+      setShowPayment(true)
     }
-  };
+  }
 
   // Function to handle OTP submission
   const handleOtpSubmit = () => {
     if (otp.length < 4) {
       // Show error or validation message
-      return;
+      return
     }
-    setVerificationInProgress(true);
+    setVerificationInProgress(true)
     
     // Simulate OTP verification
     setTimeout(() => {
-      setVerificationInProgress(false);
-      setShowPhoneVerification(false);
-      setShowPayment(true);
-      setOtpSent(false);
-      setOtp("");
-    }, 1000);
-  };
+      setVerificationInProgress(false)
+      setShowPhoneVerification(false)
+      setShowPayment(true)
+      setOtpSent(false)
+      setOtp("")
+    }, 1000)
+  }
 
   // Function to handle sending OTP
   const handleSendOtp = () => {
     if (!phoneNumber || phoneNumber.length < 10) {
       // Show error or validation message
-      return;
+      return
     }
-    setOtpSent(true);
+    setOtpSent(true)
     // In a real app, you would call an API to send OTP here
-  };
+  }
 
   const handlePayment = () => {
     // Handle payment logic here
@@ -484,13 +576,13 @@ export default function FoodListingPage() {
 
   const getCartItemQuantity = (itemId: string) => {
     // Sum quantities of all variations of this item (with different add-ons)
-    const baseId = getBaseCartItemId(itemId);
+    const baseId = getBaseCartItemId(itemId)
     return cart.reduce((total, cartItem) => {
       if (cartItem.id.startsWith(baseId)) {
-        return total + cartItem.quantity;
+        return total + cartItem.quantity
       }
-      return total;
-    }, 0);
+      return total
+    }, 0)
   }
 
   const getBaseCartItemId = (itemId: string) => {
@@ -499,123 +591,123 @@ export default function FoodListingPage() {
 
   // Add a function to format time in IST
   const getDeliveryTime = () => {
-    const now = new Date();
+    const now = new Date()
     // Add 15 minutes
-    const deliveryTime = new Date(now.getTime() + 15 * 60000);
+    const deliveryTime = new Date(now.getTime() + 15 * 60000)
     
     // Format time in 12-hour format with AM/PM
-    const hours = deliveryTime.getHours();
-    const minutes = deliveryTime.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const formattedHours = hours % 12 || 12; // Convert 0 to 12 for 12-hour format
-    const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
+    const hours = deliveryTime.getHours()
+    const minutes = deliveryTime.getMinutes()
+    const ampm = hours >= 12 ? 'PM' : 'AM'
+    const formattedHours = hours % 12 || 12 // Convert 0 to 12 for 12-hour format
+    const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes
     
     // Get day name
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dayName = days[deliveryTime.getDay()];
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const dayName = days[deliveryTime.getDay()]
     
     return {
       time: `${formattedHours}:${formattedMinutes} ${ampm}`,
       day: dayName
-    };
-  };
+    }
+  }
 
   // Add these states near the top with other state declarations
-  const [showPaymentMethod, setShowPaymentMethod] = useState(true);
-  const [showUpiApps, setShowUpiApps] = useState(false);
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [selectedUpiApp, setSelectedUpiApp] = useState<string | null>(null);
+  const [showPaymentMethod, setShowPaymentMethod] = useState(true)
+  const [showUpiApps, setShowUpiApps] = useState(false)
+  const [paymentSuccess, setPaymentSuccess] = useState(false)
+  const [selectedUpiApp, setSelectedUpiApp] = useState<string | null>(null)
 
   // UPI Apps data
   const upiApps = [
-    { id: 'gpay',icon: '/gpay.svg' },
-    { id: 'phonepe',icon: '/phonepe.png' },
-    { id: 'paytm',icon: '/paytm.png' },
-    { id: 'other',icon: '/upi.png' },
-  ];
+    { id: 'gpay', icon: '/gpay.svg' },
+    { id: 'phonepe', icon: '/phonepe.png' },
+    { id: 'paytm', icon: '/paytm.png' },
+    { id: 'other', icon: '/upi.png' },
+  ]
 
   // Handle payment method selection
   const handlePaymentMethodSelect = (method: string) => {
-    setSelectedPaymentMethod(method);
+    setSelectedPaymentMethod(method)
     
     if (method === 'paylater') {
       // For pay later, show success animation after a delay
-      setShowPaymentMethod(false);
-      setPaymentSuccess(true);
+      setShowPaymentMethod(false)
+      setPaymentSuccess(true)
       setTimeout(() => {
-        handlePaymentSuccess();
-      }, 2000);
+        handlePaymentSuccess()
+      }, 2000)
     } else if (method === 'upi') {
-      setShowUpiApps(true);
+      setShowUpiApps(true)
     }
-  };
+  }
 
   // Handle UPI app selection
   const handleUpiAppSelect = (appId: string) => {
-    setSelectedUpiApp(appId);
+    setSelectedUpiApp(appId)
     
     // Get total price in paise (e.g., 45000 = ₹450)
-    const totalInPaise = getTotalPrice();
+    const totalInPaise = getTotalPrice()
     // Convert to rupees by dividing by 100
-    const amountInRupees = (totalInPaise / 100).toFixed(2);
+    const amountInRupees = (totalInPaise / 100).toFixed(2)
     
     // Debug logs
-    console.log('Cart items:', cart);
-    console.log('Total in paise:', totalInPaise);
-    console.log('Amount in rupees:', amountInRupees);
-    console.log('Amount being sent to UPI:', amountInRupees);
+    console.log('Cart items:', cart)
+    console.log('Total in paise:', totalInPaise)
+    console.log('Amount in rupees:', amountInRupees)
+    console.log('Amount being sent to UPI:', amountInRupees)
     
     // UPI deep links
-    const merchantName = 'Foodie%20Restaurant'; // URL-encoded merchant name
-    const transactionNote = 'Food%20Order%20Payment';
+    const merchantName = 'Foodie%20Restaurant' // URL-encoded merchant name
+    const transactionNote = 'Food%20Order%20Payment'
     
     const upiLinks = {
       gpay: `tez://upi/pay?pa=devanshsaxena1019-1@okicici&pn=${merchantName}&am=${amountInRupees}&cu=INR&tn=${transactionNote}`,
       phonepe: `phonepe://pay?pa=devanshsaxena1019-1@okicici&pn=${merchantName}&am=${amountInRupees}&cu=INR&tn=${transactionNote}`,
       other: `upi://pay?pa=devanshsaxena1019-1@okicici&pn=${merchantName}&am=${amountInRupees}&cu=INR&tn=${transactionNote}`
-    };
+    }
 
     // Open the selected UPI app
-    const upiLink = upiLinks[appId as keyof typeof upiLinks] || upiLinks.other;
+    const upiLink = upiLinks[appId as keyof typeof upiLinks] || upiLinks.other
     
     // Try to open the UPI app
-    window.location.href = upiLink;
+    window.location.href = upiLink
     
     // Fallback: If UPI app not installed, show success after delay
     setTimeout(() => {
-      if (document.hidden) return; // If app opened successfully
+      if (document.hidden) return // If app opened successfully
       
       // If still on page, show success animation
-      setPaymentSuccess(true);
+      setPaymentSuccess(true)
       setTimeout(() => {
-        handlePaymentSuccess();
-      }, 2000);
-    }, 500);
-  };
+        handlePaymentSuccess()
+      }, 2000)
+    }, 500)
+  }
 
   // Handle payment success
   const handlePaymentSuccess = () => {
     // In a real app, you would handle the successful payment here
-    setShowPayment(false);
-    setShowPhoneVerification(false);
-    setPaymentSuccess(false);
-    setShowUpiApps(false);
-    setShowPaymentMethod(true);
-    setCart([]);
+    setShowPayment(false)
+    setShowPhoneVerification(false)
+    setPaymentSuccess(false)
+    setShowUpiApps(false)
+    setShowPaymentMethod(true)
+    setCart([])
     // Show success message or navigate to order confirmation
-  };
+  }
 
   useEffect(() => {
     if (showPayment) {
-      document.body.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden'
     } else {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = 'unset'
     }
     
     return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [showPayment]);
+      document.body.style.overflow = 'unset'
+    }
+  }, [showPayment])
 
   return (
     <div className={`min-h-screen bg-background ${showPayment ? 'overflow-hidden' : ''}`}>
@@ -696,8 +788,8 @@ export default function FoodListingPage() {
                 <div 
                   className="bg-muted/40 rounded-xl border-2 p-4 cursor-not-allowed border-border/50"
                   onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+                    e.preventDefault()
+                    e.stopPropagation()
                   }}
                 >
                   <div className="flex items-center justify-between">
@@ -724,9 +816,9 @@ export default function FoodListingPage() {
                 <Button 
                   onClick={() => {
                     if (selectedPaymentMethod === 'paylater') {
-                      handlePaymentMethodSelect('paylater');
+                      handlePaymentMethodSelect('paylater')
                     } else if (selectedPaymentMethod === 'upi') {
-                      setShowUpiApps(true);
+                      setShowUpiApps(true)
                     }
                   }}
                   className="w-full h-12 text-base font-semibold mt-6"
@@ -766,8 +858,8 @@ export default function FoodListingPage() {
                           className="object-contain"
                           onError={(e) => {
                             // Fallback to placeholder if image fails to load
-                            const target = e.target as HTMLImageElement;
-                            target.src = '/placeholder.svg';
+                            const target = e.target as HTMLImageElement
+                            target.src = '/placeholder.svg'
                           }}
                         />
                       </div>
@@ -811,7 +903,11 @@ export default function FoodListingPage() {
                 variant="ghost" 
                 size="sm" 
                 onClick={() => {
-                  setShowPhoneVerification(false);
+                  setShowPhoneVerification(false)
+                  setShowCheckout(true)
+                  setOtpSent(false)
+                  setOtp("")
+                  setPhoneNumber("")
                   setShowCheckout(true);
                   setOtpSent(false);
                   setOtp("");
