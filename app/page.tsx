@@ -152,14 +152,7 @@ export default function FoodListingPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [foodData, setFoodData] = useState<any[]>([])
-  // Show QR scanner by default if no outletId in URL
-  const [showQRScanner, setShowQRScanner] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return !params.has('outletId');
-    }
-    return false;
-  })
+  const [showQRScanner, setShowQRScanner] = useState(false)
   const searchParams = useSearchParams()
   const [outletId, setOutletId] = useState<string | null>(null)
 
@@ -176,10 +169,7 @@ export default function FoodListingPage() {
   }, [cart, showCheckout])
 
   useEffect(() => {
-    // Don't fetch data if we're showing the QR scanner
-    if (showQRScanner) return;
-    
-    // Check for URL parameters
+    // Check for URL parameters first
     const urlOutletId = searchParams.get('outletId')
     const urlLat = searchParams.get('lat')
     const urlLon = searchParams.get('lon')
