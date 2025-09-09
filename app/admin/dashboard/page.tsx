@@ -113,30 +113,52 @@ export default function AdminDashboard() {
 
   const handleSync = async () => {
     try {
-      setSyncStatus('Syncing...');
-      const response = await fetch('/api/sync', {
+      setSyncStatus('Syncing with external API...');
+      
+      // Format the menu items to match the required API structure
+      const formattedItems = menuItems.map(item => ({
+        id: item.id,
+        h: item.h, // name
+        dp: item.dp, // price in paise
+        ct: item.ct, // category
+        veg: item.veg,
+        wt: item.wt, // weight
+        en: item.en, // calories/energy
+        i: item.i    // image URL
+      }));
+
+      // Call the external API
+      const response = await fetch('https://foodie-backend-786353173154.us-central1.run.app/api/updateOutletFood?outletid=200', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          items: menuItems,
-          cat: ['BEVERAGES', 'STARTERS', 'MAIN COURSE', 'DESSERTS']
+          status: 200,
+          code: 10001,
+          result: "success",
+          msg: "",
+          output: {
+            outletName: "Spice Garden Mumbai",
+            city: { id: 200, name: "Mumbai", state: "Maharashtra" },
+            r: formattedItems
+          }
         }),
       });
       
       const result = await response.json();
       if (response.ok) {
-        setSyncStatus('Sync successful!');
+        setSyncStatus('Menu synced successfully with external API!');
       } else {
-        setSyncStatus(`Error: ${result.error || 'Failed to sync'}`);
+        console.error('API Error:', result);
+        setSyncStatus(`Error: ${result.msg || 'Failed to sync with external API'}`);
       }
       
-      setTimeout(() => setSyncStatus(''), 3000);
+      setTimeout(() => setSyncStatus(''), 5000);
     } catch (error) {
       console.error('Error syncing menu:', error);
-      setSyncStatus('Error syncing menu');
-      setTimeout(() => setSyncStatus(''), 3000);
+      setSyncStatus('Error: Failed to connect to external API');
+      setTimeout(() => setSyncStatus(''), 5000);
     }
   };
 
@@ -252,7 +274,7 @@ export default function AdminDashboard() {
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700">Image URL</label>
               <input
-                type="text"
+                type="url"
                 value={newItem.i}
                 onChange={(e) => setNewItem({...newItem, i: e.target.value})}
                 className="mt-1 block w-full border border-gray-300 rounded-md p-2"
@@ -260,49 +282,50 @@ export default function AdminDashboard() {
               />
               {newItem.i && (
                 <div className="mt-2">
-                  <p className="text-xs text-gray-500 mb-1">Image Preview:</p>
+                  <p className="text-sm text-gray-500 mb-1">Image Preview:</p>
                   <img 
                     src={newItem.i} 
                     alt="Preview" 
-                    className="h-20 w-20 object-cover rounded border border-gray-200"
+                    className="h-32 w-32 object-cover rounded"
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
                       target.onerror = null;
-                      target.src = 'https://via.placeholder.com/100';
+                      target.src = 'https://via.placeholder.com/128';
                     }}
                   />
                 </div>
               )}
             </div>
-            <div className="flex items-end space-x-2">
-              <button
-                type="button"
-                onClick={handleSaveItem}
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-                disabled={!newItem.h || !newItem.i}
-              >
-                {editingId ? 'Update Item' : 'Add Item'}
-              </button>
-              {editingId && (
+            <div className="col-span-full">
+              <div className="flex justify-end space-x-4">
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewItem({
+                        h: '',
+                        dp: 0,
+                        ct: 'MAIN COURSE',
+                        veg: true,
+                        wt: '',
+                        en: '',
+                        i: ''
+                      });
+                      setEditingId(null);
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => {
-                    setNewItem({
-                      h: '',
-                      dp: 0,
-                      ct: 'MAIN COURSE',
-                      veg: true,
-                      wt: '',
-                      en: '',
-                      i: ''
-                    });
-                    setEditingId(null);
-                  }}
-                  className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600"
+                  onClick={handleSaveItem}
+                  className="px-4 py-2 border border-transparent rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
                 >
-                  Cancel
+                  {editingId ? 'Update' : 'Add'} Item
                 </button>
-              )}
+              </div>
             </div>
           </div>
         </div>
