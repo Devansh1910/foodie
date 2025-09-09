@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import LogoutButton from '@/components/LogoutButton';
+import ImageUploader from '@/components/ImageUploader';
 
 interface MenuItem {
   id: string;
@@ -272,29 +273,11 @@ export default function AdminDashboard() {
               />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700">Image URL</label>
-              <input
-                type="url"
-                value={newItem.i}
-                onChange={(e) => setNewItem({...newItem, i: e.target.value})}
-                className="mt-1 block w-full border border-gray-300 rounded-md p-2"
-                placeholder="https://example.com/image.jpg"
+              <label className="block text-sm font-medium text-gray-700 mb-2">Item Image</label>
+              <ImageUploader 
+                onUploadSuccess={(url) => setNewItem({...newItem, i: url})}
+                currentImage={newItem.i}
               />
-              {newItem.i && (
-                <div className="mt-2">
-                  <p className="text-sm text-gray-500 mb-1">Image Preview:</p>
-                  <img 
-                    src={newItem.i} 
-                    alt="Preview" 
-                    className="h-32 w-32 object-cover rounded"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.onerror = null;
-                      target.src = 'https://via.placeholder.com/128';
-                    }}
-                  />
-                </div>
-              )}
             </div>
             <div className="col-span-full">
               <div className="flex justify-end space-x-4">
